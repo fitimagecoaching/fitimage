@@ -1,9 +1,5 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, and, or, desc } from "drizzle-orm";
+// Pure in-memory storage — no native dependencies, works on any platform
 import {
-  users, programs, clientPrograms, workouts, workoutLogs,
-  messages, communityPosts, communityComments, resources, habitLogs,
   type User, type InsertUser,
   type Program, type InsertProgram,
   type ClientProgram, type InsertClientProgram,
@@ -16,322 +12,210 @@ import {
   type HabitLog, type InsertHabitLog,
 } from "@shared/schema";
 
-const sqlite = new Database("fitimage.db");
-export const db = drizzle(sqlite);
+let nextId = 1;
+const uid = () => nextId++;
 
-// Create tables
-sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'client',
-    avatar_url TEXT,
-    bio TEXT,
-    goals TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS programs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    coach_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    description TEXT,
-    duration_weeks INTEGER NOT NULL DEFAULT 4,
-    is_template INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS client_programs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id INTEGER NOT NULL,
-    program_id INTEGER NOT NULL,
-    start_date TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    assigned_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS workouts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    program_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'traditional',
-    day_of_week INTEGER NOT NULL,
-    week_number INTEGER NOT NULL DEFAULT 1,
-    notes TEXT,
-    time_cap INTEGER,
-    round_count INTEGER,
-    work_interval INTEGER,
-    rest_interval INTEGER,
-    score_type TEXT,
-    blocks TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS workout_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id INTEGER NOT NULL,
-    workout_id INTEGER NOT NULL,
-    completed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    duration INTEGER,
-    score TEXT,
-    notes TEXT,
-    set_logs TEXT,
-    rating INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_id INTEGER NOT NULL,
-    to_id INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    is_read INTEGER DEFAULT 0,
-    sent_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS community_posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    author_id INTEGER NOT NULL,
-    type TEXT NOT NULL DEFAULT 'post',
-    title TEXT,
-    body TEXT NOT NULL,
-    image_url TEXT,
-    likes_json TEXT DEFAULT '[]',
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS community_comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    post_id INTEGER NOT NULL,
-    author_id INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS resources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    coach_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
-    category TEXT DEFAULT 'teaching',
-    file_name TEXT NOT NULL,
-    file_data TEXT NOT NULL,
-    file_size INTEGER,
-    uploaded_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-  CREATE TABLE IF NOT EXISTS habit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id INTEGER NOT NULL,
-    date TEXT NOT NULL,
-    water INTEGER,
-    sleep REAL,
-    nutrition INTEGER,
-    stress INTEGER,
-    notes TEXT,
-    logged_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-`);
+// ─── In-memory tables ────────────────────────────────────────────────────────
+const db = {
+  users: [] as User[],
+  programs: [] as Program[],
+  clientPrograms: [] as ClientProgram[],
+  workouts: [] as Workout[],
+  workoutLogs: [] as WorkoutLog[],
+  messages: [] as Message[],
+  communityPosts: [] as CommunityPost[],
+  communityComments: [] as CommunityComment[],
+  resources: [] as Resource[],
+  habitLogs: [] as HabitLog[],
+};
 
-// Seed coach account if not exists
-const existingCoach = sqlite.prepare("SELECT id FROM users WHERE role = 'coach' LIMIT 1").get();
-if (!existingCoach) {
-  sqlite.prepare(`
-    INSERT INTO users (name, email, password, role, bio)
-    VALUES ('FitImage Coach', 'coach@fitimage.com', 'fitimage2024', 'coach', 'NASM Certified · Precision Nutrition L1 · Behavior Change Coach')
-  `).run();
-}
+// Seed coach account
+db.users.push({
+  id: uid(),
+  name: "FitImage Coach",
+  email: "coach@fitimage.com",
+  password: "fitimage2024",
+  role: "coach",
+  avatarUrl: null,
+  bio: "NASM Certified · Precision Nutrition L1 · Behavior Change Coach",
+  goals: null,
+  createdAt: Date.now(),
+});
 
 export interface IStorage {
-  // Users
   getUserById(id: number): User | undefined;
   getUserByEmail(email: string): User | undefined;
   createUser(data: InsertUser): User;
   updateUser(id: number, data: Partial<InsertUser>): User | undefined;
   getAllClients(): User[];
 
-  // Programs
   getPrograms(coachId: number): Program[];
   getProgramById(id: number): Program | undefined;
   createProgram(data: InsertProgram): Program;
   updateProgram(id: number, data: Partial<InsertProgram>): Program | undefined;
   deleteProgram(id: number): void;
 
-  // Client Programs
   assignProgram(data: InsertClientProgram): ClientProgram;
   getClientPrograms(clientId: number): ClientProgram[];
   getActiveClientProgram(clientId: number): ClientProgram | undefined;
   updateClientProgram(id: number, data: Partial<InsertClientProgram>): ClientProgram | undefined;
 
-  // Workouts
   getWorkoutsByProgram(programId: number): Workout[];
   getWorkoutById(id: number): Workout | undefined;
   createWorkout(data: InsertWorkout): Workout;
   updateWorkout(id: number, data: Partial<InsertWorkout>): Workout | undefined;
   deleteWorkout(id: number): void;
 
-  // Workout Logs
   createWorkoutLog(data: InsertWorkoutLog): WorkoutLog;
   getWorkoutLogs(clientId: number): WorkoutLog[];
   getWorkoutLogsByWorkout(workoutId: number): WorkoutLog[];
 
-  // Messages
   sendMessage(data: InsertMessage): Message;
   getConversation(userId1: number, userId2: number): Message[];
   getInbox(userId: number): Message[];
   markRead(messageId: number): void;
 
-  // Community
   getCommunityPosts(): CommunityPost[];
   createCommunityPost(data: InsertCommunityPost): CommunityPost;
   toggleLike(postId: number, userId: number): CommunityPost | undefined;
   getComments(postId: number): CommunityComment[];
   createComment(data: InsertCommunityComment): CommunityComment;
 
-  // Resources
   getResources(): Resource[];
   createResource(data: InsertResource): Resource;
   deleteResource(id: number): void;
+  getResourceFull(id: number): Resource | undefined;
 
-  // Habit Logs
   createHabitLog(data: InsertHabitLog): HabitLog;
   getHabitLogs(clientId: number): HabitLog[];
   getHabitLogByDate(clientId: number, date: string): HabitLog | undefined;
 }
 
 export class Storage implements IStorage {
-  getUserById(id: number) {
-    return db.select().from(users).where(eq(users.id, id)).get();
-  }
-  getUserByEmail(email: string) {
-    return db.select().from(users).where(eq(users.email, email)).get();
-  }
-  createUser(data: InsertUser) {
-    return db.insert(users).values(data).returning().get();
+  getUserById(id: number) { return db.users.find(u => u.id === id); }
+  getUserByEmail(email: string) { return db.users.find(u => u.email === email); }
+  createUser(data: InsertUser): User {
+    const u: User = { id: uid(), avatarUrl: null, bio: null, goals: null, createdAt: Date.now(), role: "client", ...data };
+    db.users.push(u); return u;
   }
   updateUser(id: number, data: Partial<InsertUser>) {
-    return db.update(users).set(data).where(eq(users.id, id)).returning().get();
+    const i = db.users.findIndex(u => u.id === id);
+    if (i === -1) return undefined;
+    db.users[i] = { ...db.users[i], ...data };
+    return db.users[i];
   }
-  getAllClients() {
-    return db.select().from(users).where(eq(users.role, "client")).all();
-  }
+  getAllClients() { return db.users.filter(u => u.role === "client"); }
 
-  getPrograms(coachId: number) {
-    return db.select().from(programs).where(eq(programs.coachId, coachId)).all();
-  }
-  getProgramById(id: number) {
-    return db.select().from(programs).where(eq(programs.id, id)).get();
-  }
-  createProgram(data: InsertProgram) {
-    return db.insert(programs).values(data).returning().get();
+  getPrograms(coachId: number) { return db.programs.filter(p => p.coachId === coachId); }
+  getProgramById(id: number) { return db.programs.find(p => p.id === id); }
+  createProgram(data: InsertProgram): Program {
+    const p: Program = { id: uid(), description: null, durationWeeks: 4, isTemplate: false, createdAt: Date.now(), ...data };
+    db.programs.push(p); return p;
   }
   updateProgram(id: number, data: Partial<InsertProgram>) {
-    return db.update(programs).set(data).where(eq(programs.id, id)).returning().get();
+    const i = db.programs.findIndex(p => p.id === id);
+    if (i === -1) return undefined;
+    db.programs[i] = { ...db.programs[i], ...data };
+    return db.programs[i];
   }
-  deleteProgram(id: number) {
-    db.delete(programs).where(eq(programs.id, id)).run();
-  }
+  deleteProgram(id: number) { db.programs = db.programs.filter(p => p.id !== id); }
 
-  assignProgram(data: InsertClientProgram) {
-    return db.insert(clientPrograms).values(data).returning().get();
+  assignProgram(data: InsertClientProgram): ClientProgram {
+    const cp: ClientProgram = { id: uid(), status: "active", assignedAt: Date.now(), ...data };
+    db.clientPrograms.push(cp); return cp;
   }
-  getClientPrograms(clientId: number) {
-    return db.select().from(clientPrograms).where(eq(clientPrograms.clientId, clientId)).all();
-  }
+  getClientPrograms(clientId: number) { return db.clientPrograms.filter(cp => cp.clientId === clientId); }
   getActiveClientProgram(clientId: number) {
-    return db.select().from(clientPrograms)
-      .where(and(eq(clientPrograms.clientId, clientId), eq(clientPrograms.status, "active")))
-      .get();
+    return db.clientPrograms.find(cp => cp.clientId === clientId && cp.status === "active");
   }
   updateClientProgram(id: number, data: Partial<InsertClientProgram>) {
-    return db.update(clientPrograms).set(data).where(eq(clientPrograms.id, id)).returning().get();
+    const i = db.clientPrograms.findIndex(cp => cp.id === id);
+    if (i === -1) return undefined;
+    db.clientPrograms[i] = { ...db.clientPrograms[i], ...data };
+    return db.clientPrograms[i];
   }
 
-  getWorkoutsByProgram(programId: number) {
-    return db.select().from(workouts).where(eq(workouts.programId, programId)).all();
-  }
-  getWorkoutById(id: number) {
-    return db.select().from(workouts).where(eq(workouts.id, id)).get();
-  }
-  createWorkout(data: InsertWorkout) {
-    return db.insert(workouts).values(data).returning().get();
+  getWorkoutsByProgram(programId: number) { return db.workouts.filter(w => w.programId === programId); }
+  getWorkoutById(id: number) { return db.workouts.find(w => w.id === id); }
+  createWorkout(data: InsertWorkout): Workout {
+    const w: Workout = {
+      id: uid(), type: "traditional", notes: null, timeCap: null, roundCount: null,
+      workInterval: null, restInterval: null, scoreType: null, blocks: null,
+      weekNumber: 1, createdAt: Date.now(), ...data
+    };
+    db.workouts.push(w); return w;
   }
   updateWorkout(id: number, data: Partial<InsertWorkout>) {
-    return db.update(workouts).set(data).where(eq(workouts.id, id)).returning().get();
+    const i = db.workouts.findIndex(w => w.id === id);
+    if (i === -1) return undefined;
+    db.workouts[i] = { ...db.workouts[i], ...data };
+    return db.workouts[i];
   }
-  deleteWorkout(id: number) {
-    db.delete(workouts).where(eq(workouts.id, id)).run();
-  }
+  deleteWorkout(id: number) { db.workouts = db.workouts.filter(w => w.id !== id); }
 
-  createWorkoutLog(data: InsertWorkoutLog) {
-    return db.insert(workoutLogs).values(data).returning().get();
+  createWorkoutLog(data: InsertWorkoutLog): WorkoutLog {
+    const wl: WorkoutLog = { id: uid(), completedAt: Date.now(), duration: null, score: null, notes: null, setLogs: null, rating: null, ...data };
+    db.workoutLogs.push(wl); return wl;
   }
   getWorkoutLogs(clientId: number) {
-    return db.select().from(workoutLogs).where(eq(workoutLogs.clientId, clientId))
-      .orderBy(desc(workoutLogs.completedAt)).all();
+    return db.workoutLogs.filter(wl => wl.clientId === clientId).sort((a, b) => b.completedAt - a.completedAt);
   }
-  getWorkoutLogsByWorkout(workoutId: number) {
-    return db.select().from(workoutLogs).where(eq(workoutLogs.workoutId, workoutId)).all();
-  }
+  getWorkoutLogsByWorkout(workoutId: number) { return db.workoutLogs.filter(wl => wl.workoutId === workoutId); }
 
-  sendMessage(data: InsertMessage) {
-    return db.insert(messages).values(data).returning().get();
+  sendMessage(data: InsertMessage): Message {
+    const m: Message = { id: uid(), isRead: false, sentAt: Date.now(), ...data };
+    db.messages.push(m); return m;
   }
   getConversation(userId1: number, userId2: number) {
-    return db.select().from(messages)
-      .where(or(
-        and(eq(messages.fromId, userId1), eq(messages.toId, userId2)),
-        and(eq(messages.fromId, userId2), eq(messages.toId, userId1))
-      ))
-      .orderBy(messages.sentAt).all();
+    return db.messages
+      .filter(m => (m.fromId === userId1 && m.toId === userId2) || (m.fromId === userId2 && m.toId === userId1))
+      .sort((a, b) => a.sentAt - b.sentAt);
   }
   getInbox(userId: number) {
-    return db.select().from(messages)
-      .where(or(eq(messages.fromId, userId), eq(messages.toId, userId)))
-      .orderBy(desc(messages.sentAt)).all();
+    return db.messages.filter(m => m.fromId === userId || m.toId === userId).sort((a, b) => b.sentAt - a.sentAt);
   }
   markRead(messageId: number) {
-    db.update(messages).set({ isRead: true }).where(eq(messages.id, messageId)).run();
+    const m = db.messages.find(m => m.id === messageId);
+    if (m) m.isRead = true;
   }
 
-  getCommunityPosts() {
-    return db.select().from(communityPosts).orderBy(desc(communityPosts.createdAt)).all();
-  }
-  createCommunityPost(data: InsertCommunityPost) {
-    return db.insert(communityPosts).values(data).returning().get();
+  getCommunityPosts() { return [...db.communityPosts].sort((a, b) => b.createdAt - a.createdAt); }
+  createCommunityPost(data: InsertCommunityPost): CommunityPost {
+    const p: CommunityPost = { id: uid(), type: "post", title: null, imageUrl: null, likesJson: "[]", createdAt: Date.now(), ...data };
+    db.communityPosts.push(p); return p;
   }
   toggleLike(postId: number, userId: number) {
-    const post = db.select().from(communityPosts).where(eq(communityPosts.id, postId)).get();
-    if (!post) return undefined;
-    const likes: number[] = JSON.parse(post.likesJson || "[]");
+    const p = db.communityPosts.find(p => p.id === postId);
+    if (!p) return undefined;
+    const likes: number[] = JSON.parse(p.likesJson || "[]");
     const idx = likes.indexOf(userId);
     if (idx === -1) likes.push(userId); else likes.splice(idx, 1);
-    return db.update(communityPosts).set({ likesJson: JSON.stringify(likes) })
-      .where(eq(communityPosts.id, postId)).returning().get();
+    p.likesJson = JSON.stringify(likes);
+    return p;
   }
-  getComments(postId: number) {
-    return db.select().from(communityComments).where(eq(communityComments.postId, postId))
-      .orderBy(communityComments.createdAt).all();
-  }
-  createComment(data: InsertCommunityComment) {
-    return db.insert(communityComments).values(data).returning().get();
+  getComments(postId: number) { return db.communityComments.filter(c => c.postId === postId).sort((a, b) => a.createdAt - b.createdAt); }
+  createComment(data: InsertCommunityComment): CommunityComment {
+    const c: CommunityComment = { id: uid(), createdAt: Date.now(), ...data };
+    db.communityComments.push(c); return c;
   }
 
-  getResources() {
-    return db.select().from(resources).orderBy(desc(resources.uploadedAt)).all();
+  getResources() { return [...db.resources].sort((a, b) => b.uploadedAt - a.uploadedAt); }
+  createResource(data: InsertResource): Resource {
+    const r: Resource = { id: uid(), description: null, category: "teaching", fileSize: null, uploadedAt: Date.now(), ...data };
+    db.resources.push(r); return r;
   }
-  createResource(data: InsertResource) {
-    return db.insert(resources).values(data).returning().get();
-  }
-  deleteResource(id: number) {
-    db.delete(resources).where(eq(resources.id, id)).run();
-  }
-  getResourceFull(id: number) {
-    return db.select().from(resources).where(eq(resources.id, id)).get();
-  }
+  deleteResource(id: number) { db.resources = db.resources.filter(r => r.id !== id); }
+  getResourceFull(id: number) { return db.resources.find(r => r.id === id); }
 
-  createHabitLog(data: InsertHabitLog) {
-    return db.insert(habitLogs).values(data).returning().get();
+  createHabitLog(data: InsertHabitLog): HabitLog {
+    const h: HabitLog = { id: uid(), water: null, sleep: null, nutrition: null, stress: null, notes: null, loggedAt: Date.now(), ...data };
+    db.habitLogs.push(h); return h;
   }
   getHabitLogs(clientId: number) {
-    return db.select().from(habitLogs).where(eq(habitLogs.clientId, clientId))
-      .orderBy(desc(habitLogs.date)).all();
+    return db.habitLogs.filter(h => h.clientId === clientId).sort((a, b) => b.date.localeCompare(a.date));
   }
   getHabitLogByDate(clientId: number, date: string) {
-    return db.select().from(habitLogs)
-      .where(and(eq(habitLogs.clientId, clientId), eq(habitLogs.date, date))).get();
+    return db.habitLogs.find(h => h.clientId === clientId && h.date === date);
   }
 }
 

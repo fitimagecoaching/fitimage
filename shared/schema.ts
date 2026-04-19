@@ -1,170 +1,213 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // ─── USERS ───────────────────────────────────────────────────────────────────
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  role: text("role").notNull().default("client"), // "coach" | "client"
-  avatarUrl: text("avatar_url"),
-  bio: text("bio"),
-  goals: text("goals"),
-  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+export interface User {
+  id: number;
+  name: string;
+  email: string;
+  password: string;
+  role: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  goals: string | null;
+  createdAt: number;
+}
+export const insertUserSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  password: z.string(),
+  role: z.string().default("client"),
+  avatarUrl: z.string().nullable().optional(),
+  bio: z.string().nullable().optional(),
+  goals: z.string().nullable().optional(),
 });
-
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
 
 // ─── PROGRAMS ────────────────────────────────────────────────────────────────
-export const programs = sqliteTable("programs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  coachId: integer("coach_id").notNull(),
-  name: text("name").notNull(),
-  description: text("description"),
-  durationWeeks: integer("duration_weeks").notNull().default(4),
-  isTemplate: integer("is_template", { mode: "boolean" }).default(false),
-  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+export interface Program {
+  id: number;
+  coachId: number;
+  name: string;
+  description: string | null;
+  durationWeeks: number;
+  isTemplate: boolean | null;
+  createdAt: number;
+}
+export const insertProgramSchema = z.object({
+  coachId: z.number(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  durationWeeks: z.number().default(4),
+  isTemplate: z.boolean().nullable().optional(),
 });
-
-export const insertProgramSchema = createInsertSchema(programs).omit({ id: true, createdAt: true });
 export type InsertProgram = z.infer<typeof insertProgramSchema>;
-export type Program = typeof programs.$inferSelect;
 
 // ─── CLIENT PROGRAM ASSIGNMENTS ──────────────────────────────────────────────
-export const clientPrograms = sqliteTable("client_programs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  clientId: integer("client_id").notNull(),
-  programId: integer("program_id").notNull(),
-  startDate: text("start_date").notNull(), // ISO date string
-  status: text("status").notNull().default("active"), // "active" | "completed" | "paused"
-  assignedAt: integer("assigned_at").notNull().$defaultFn(() => Date.now()),
+export interface ClientProgram {
+  id: number;
+  clientId: number;
+  programId: number;
+  startDate: string;
+  status: string;
+  assignedAt: number;
+}
+export const insertClientProgramSchema = z.object({
+  clientId: z.number(),
+  programId: z.number(),
+  startDate: z.string(),
+  status: z.string().default("active"),
 });
-
-export const insertClientProgramSchema = createInsertSchema(clientPrograms).omit({ id: true, assignedAt: true });
 export type InsertClientProgram = z.infer<typeof insertClientProgramSchema>;
-export type ClientProgram = typeof clientPrograms.$inferSelect;
 
 // ─── WORKOUTS ────────────────────────────────────────────────────────────────
-// type: "traditional" | "wod" | "emom" | "amrap" | "tabata"
-// dayOfWeek: 0=Sun, 1=Mon, ... 5=Fri
-export const workouts = sqliteTable("workouts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  programId: integer("program_id").notNull(),
-  name: text("name").notNull(),
-  type: text("type").notNull().default("traditional"),
-  dayOfWeek: integer("day_of_week").notNull(), // 0-5 (Sun-Fri)
-  weekNumber: integer("week_number").notNull().default(1),
-  notes: text("notes"),
-  // Timed workout settings (EMOM/AMRAP/Tabata)
-  timeCap: integer("time_cap"), // seconds
-  roundCount: integer("round_count"),
-  workInterval: integer("work_interval"), // seconds (Tabata)
-  restInterval: integer("rest_interval"), // seconds (Tabata)
-  // WOD scoring
-  scoreType: text("score_type"), // "time" | "reps" | "rounds" | "weight" | "none"
-  // JSON blocks for complex structures
-  blocks: text("blocks"), // JSON: [{blockName, exercises:[...]}] for traditional; exercise list for others
-  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+export interface Workout {
+  id: number;
+  programId: number;
+  name: string;
+  type: string;
+  dayOfWeek: number;
+  weekNumber: number;
+  notes: string | null;
+  timeCap: number | null;
+  roundCount: number | null;
+  workInterval: number | null;
+  restInterval: number | null;
+  scoreType: string | null;
+  blocks: string | null;
+  createdAt: number;
+}
+export const insertWorkoutSchema = z.object({
+  programId: z.number(),
+  name: z.string(),
+  type: z.string().default("traditional"),
+  dayOfWeek: z.number(),
+  weekNumber: z.number().default(1),
+  notes: z.string().nullable().optional(),
+  timeCap: z.number().nullable().optional(),
+  roundCount: z.number().nullable().optional(),
+  workInterval: z.number().nullable().optional(),
+  restInterval: z.number().nullable().optional(),
+  scoreType: z.string().nullable().optional(),
+  blocks: z.string().nullable().optional(),
 });
-
-export const insertWorkoutSchema = createInsertSchema(workouts).omit({ id: true, createdAt: true });
 export type InsertWorkout = z.infer<typeof insertWorkoutSchema>;
-export type Workout = typeof workouts.$inferSelect;
 
 // ─── WORKOUT LOGS ─────────────────────────────────────────────────────────────
-export const workoutLogs = sqliteTable("workout_logs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  clientId: integer("client_id").notNull(),
-  workoutId: integer("workout_id").notNull(),
-  completedAt: integer("completed_at").notNull().$defaultFn(() => Date.now()),
-  duration: integer("duration"), // seconds
-  score: text("score"), // WOD score: time string, reps count, rounds count etc
-  notes: text("notes"),
-  setLogs: text("set_logs"), // JSON: [{exerciseName, sets:[{weight,reps,completed}]}]
-  rating: integer("rating"), // 1-5
+export interface WorkoutLog {
+  id: number;
+  clientId: number;
+  workoutId: number;
+  completedAt: number;
+  duration: number | null;
+  score: string | null;
+  notes: string | null;
+  setLogs: string | null;
+  rating: number | null;
+}
+export const insertWorkoutLogSchema = z.object({
+  clientId: z.number(),
+  workoutId: z.number(),
+  duration: z.number().nullable().optional(),
+  score: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  setLogs: z.string().nullable().optional(),
+  rating: z.number().nullable().optional(),
 });
-
-export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id: true, completedAt: true });
 export type InsertWorkoutLog = z.infer<typeof insertWorkoutLogSchema>;
-export type WorkoutLog = typeof workoutLogs.$inferSelect;
 
 // ─── MESSAGES ────────────────────────────────────────────────────────────────
-export const messages = sqliteTable("messages", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  fromId: integer("from_id").notNull(),
-  toId: integer("to_id").notNull(),
-  body: text("body").notNull(),
-  isRead: integer("is_read", { mode: "boolean" }).default(false),
-  sentAt: integer("sent_at").notNull().$defaultFn(() => Date.now()),
+export interface Message {
+  id: number;
+  fromId: number;
+  toId: number;
+  body: string;
+  isRead: boolean | null;
+  sentAt: number;
+}
+export const insertMessageSchema = z.object({
+  fromId: z.number(),
+  toId: z.number(),
+  body: z.string(),
 });
-
-export const insertMessageSchema = createInsertSchema(messages).omit({ id: true, sentAt: true, isRead: true });
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
-export type Message = typeof messages.$inferSelect;
 
 // ─── COMMUNITY POSTS ─────────────────────────────────────────────────────────
-export const communityPosts = sqliteTable("community_posts", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  authorId: integer("author_id").notNull(),
-  type: text("type").notNull().default("post"), // "post" | "challenge"
-  title: text("title"),
-  body: text("body").notNull(),
-  imageUrl: text("image_url"),
-  likesJson: text("likes_json").default("[]"), // JSON array of user IDs
-  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+export interface CommunityPost {
+  id: number;
+  authorId: number;
+  type: string;
+  title: string | null;
+  body: string;
+  imageUrl: string | null;
+  likesJson: string | null;
+  createdAt: number;
+}
+export const insertCommunityPostSchema = z.object({
+  authorId: z.number(),
+  type: z.string().default("post"),
+  title: z.string().nullable().optional(),
+  body: z.string(),
+  imageUrl: z.string().nullable().optional(),
 });
-
-export const insertCommunityPostSchema = createInsertSchema(communityPosts).omit({ id: true, createdAt: true, likesJson: true });
 export type InsertCommunityPost = z.infer<typeof insertCommunityPostSchema>;
-export type CommunityPost = typeof communityPosts.$inferSelect;
 
 // ─── COMMUNITY COMMENTS ──────────────────────────────────────────────────────
-export const communityComments = sqliteTable("community_comments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  postId: integer("post_id").notNull(),
-  authorId: integer("author_id").notNull(),
-  body: text("body").notNull(),
-  createdAt: integer("created_at").notNull().$defaultFn(() => Date.now()),
+export interface CommunityComment {
+  id: number;
+  postId: number;
+  authorId: number;
+  body: string;
+  createdAt: number;
+}
+export const insertCommunityCommentSchema = z.object({
+  postId: z.number(),
+  authorId: z.number(),
+  body: z.string(),
 });
-
-export const insertCommunityCommentSchema = createInsertSchema(communityComments).omit({ id: true, createdAt: true });
 export type InsertCommunityComment = z.infer<typeof insertCommunityCommentSchema>;
-export type CommunityComment = typeof communityComments.$inferSelect;
 
 // ─── MINISTRY RESOURCES ──────────────────────────────────────────────────────
-export const resources = sqliteTable("resources", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  coachId: integer("coach_id").notNull(),
-  title: text("title").notNull(),
-  description: text("description"),
-  category: text("category").default("teaching"), // "teaching" | "devotional" | "nutrition" | "other"
-  fileName: text("file_name").notNull(),
-  fileData: text("file_data").notNull(), // base64 encoded
-  fileSize: integer("file_size"),
-  uploadedAt: integer("uploaded_at").notNull().$defaultFn(() => Date.now()),
+export interface Resource {
+  id: number;
+  coachId: number;
+  title: string;
+  description: string | null;
+  category: string | null;
+  fileName: string;
+  fileData: string;
+  fileSize: number | null;
+  uploadedAt: number;
+}
+export const insertResourceSchema = z.object({
+  coachId: z.number(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  fileName: z.string(),
+  fileData: z.string(),
+  fileSize: z.number().nullable().optional(),
 });
-
-export const insertResourceSchema = createInsertSchema(resources).omit({ id: true, uploadedAt: true });
 export type InsertResource = z.infer<typeof insertResourceSchema>;
-export type Resource = typeof resources.$inferSelect;
 
 // ─── HABIT LOGS ──────────────────────────────────────────────────────────────
-export const habitLogs = sqliteTable("habit_logs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  clientId: integer("client_id").notNull(),
-  date: text("date").notNull(), // ISO date
-  water: integer("water"), // cups
-  sleep: real("sleep"), // hours
-  nutrition: integer("nutrition"), // 1-5 rating
-  stress: integer("stress"), // 1-5 rating
-  notes: text("notes"),
-  loggedAt: integer("logged_at").notNull().$defaultFn(() => Date.now()),
+export interface HabitLog {
+  id: number;
+  clientId: number;
+  date: string;
+  water: number | null;
+  sleep: number | null;
+  nutrition: number | null;
+  stress: number | null;
+  notes: string | null;
+  loggedAt: number;
+}
+export const insertHabitLogSchema = z.object({
+  clientId: z.number(),
+  date: z.string(),
+  water: z.number().nullable().optional(),
+  sleep: z.number().nullable().optional(),
+  nutrition: z.number().nullable().optional(),
+  stress: z.number().nullable().optional(),
+  notes: z.string().nullable().optional(),
 });
-
-export const insertHabitLogSchema = createInsertSchema(habitLogs).omit({ id: true, loggedAt: true });
 export type InsertHabitLog = z.infer<typeof insertHabitLogSchema>;
-export type HabitLog = typeof habitLogs.$inferSelect;
